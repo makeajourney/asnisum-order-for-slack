@@ -27,8 +27,8 @@ module.exports = async (req, res) => {
 
   try {
     // 리시버 생성
-    logger.info('Creating Vercel receiver');
-    const receiver = new VercelReceiver({
+    logger.info('Creating Express receiver');
+    const receiver = new ExpressReceiver({
       signingSecret: process.env.SLACK_SIGNING_SECRET,
       processBeforeResponse: true
     });
@@ -295,8 +295,8 @@ module.exports = async (req, res) => {
     });
 
     // 요청 처리
-    await receiver.start();
-    return await receiver.handleRequest(req, res);
+    // Express receiver의 app 객체를 사용하여 요청 처리
+    return await receiver.app(req, res);
 
   } catch (error) {
     logger.error('Handler error:', error);
