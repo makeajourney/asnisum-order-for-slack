@@ -286,7 +286,10 @@ module.exports = async (req, res) => {
     method: req.method,
     url: req.url,
     type: req.body?.type,
-    action: req.body?.action_id,
+    action: req.body?.payload
+      ? JSON.parse(req.body.payload).action_id
+      : req.body?.action_id,
+    body: req.body,
   });
 
   // Health check
@@ -299,11 +302,22 @@ module.exports = async (req, res) => {
   try {
     const app = getApp();
 
-    // 요청 처리
-    await app.processEvent({
-      body: req.body,
-      headers: req.headers,
-    });
+    // Slack의 인터랙티브 컴포넌트(버튼 등) 처리
+    if (req.body?.payload) {
+      const payload = JSON.parse(req.body.payload);
+      logger.info('Interactive payload received:', payload);
+
+      await app.processEvent({
+        body: payload,
+        headers: req.headers,
+      });
+    } else {
+      // 일반 이벤트 처리
+      await app.processEvent({
+        body: req.body,
+        headers: req.headers,
+      });
+    }
 
     return res.status(200).json({ ok: true });
   } catch (error) {
