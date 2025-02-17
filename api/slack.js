@@ -215,7 +215,9 @@ async function handleOrderButton({ body, client, respond }) {
 // 주문 제출 핸들러
 async function handleOrderSubmission({ ack, body, view, client }) {
   try {
-    await ack();
+    if (typeof ack === 'function') {
+      await ack();
+    }
 
     const channelId = view.private_metadata;
     const session = await orderManager.getSession(channelId);
@@ -431,39 +433,40 @@ module.exports = async (req, res) => {
   try {
     const app = getApp();
 
-    // Slack의 인터랙티브 컴포넌트(버튼 등) 처리
     if (req.body?.payload) {
       const payload = JSON.parse(req.body.payload);
       logger.info('Interactive payload received:', payload);
 
-      // Manual acknowledge for interactive components
-      const ack = async () => {
-        logger.info('Acknowledging interactive action');
-        return Promise.resolve();
-      };
-
       if (payload.type === 'view_submission') {
-        // 모달 제출 처리
+        // view_submission 이벤트에 대한 특별한 ack 함수 정의
+        const ackFn = async (response) => {
+          logger.info('Acknowledging view submission with response:', response);
+          // 응답이 있는 경우 (예: 에러 메시지) 해당 응답을 반환
+          if (response) {
+            return res.status(200).json(response);
+          }
+          // 응답이 없는 경우 기본 성공 응답
+          return res.status(200).json({ response_action: 'clear' });
+        };
+
+        // 이벤트 처리
         await app.processEvent({
           body: {
             ...payload,
-            ack: async (response) => {
-              logger.info(
-                'Acknowledging view submission with response:',
-                response
-              );
-              // 응답이 있는 경우 (예: 에러 메시지) 해당 응답을 반환
-              if (response) {
-                return res.status(200).json(response);
-              }
-              // 응답이 없는 경우 기본 성공 응답
-              return Promise.resolve();
-            },
+            ack: ackFn,
           },
           headers: req.headers,
         });
+
+        // 여기서 바로 응답을 보내지 않음
+        return;
       } else {
-        // 다른 인터랙티브 컴포넌트 처리
+        // 다른 인터랙티브 컴포넌트에 대한 기본 ack
+        const ack = async () => {
+          logger.info('Acknowledging interactive action');
+          return Promise.resolve();
+        };
+
         await app.processEvent({
           body: {
             ...payload,
@@ -487,7 +490,6 @@ module.exports = async (req, res) => {
       body: req.body,
     });
 
-    // 500 에러 대신 200으로 응답 (Slack은 3초 이내 200 응답을 기대함)
     return res.status(200).json({
       ok: false,
       error: error.message,
