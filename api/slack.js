@@ -245,8 +245,6 @@ const setupHandlers = (app) => {
 
   // 주문 모달 제출
   app.view('order_submission', async ({ ack, body, view, client }) => {
-    await ack();
-
     try {
       const channelId = view.private_metadata;
       const session = await orderManager.getSession(channelId);
