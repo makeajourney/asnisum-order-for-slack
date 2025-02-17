@@ -228,9 +228,6 @@ async function handleOrderSubmission({ body, view, client }) {
       };
     }
 
-    // Close the modal first
-    res.status(200).json(result);
-
     const orderData = {
       userId: body.user.id,
       menu: view.state.values.menu.menu_input.selected_option.value,
@@ -456,6 +453,8 @@ module.exports = async (req, res) => {
             },
             headers: req.headers,
           });
+
+          res.status(200).send({ response_action: 'clear' });
         } catch (error) {
           logger.error('View submission error:', {
             error: error.message,
