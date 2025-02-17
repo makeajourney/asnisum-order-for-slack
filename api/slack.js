@@ -36,6 +36,226 @@ const getApp = () => {
   return app;
 };
 
+function createOrderModal(trigger_id, channel_id) {
+  return {
+    trigger_id,
+    view: {
+      type: 'modal',
+      callback_id: 'order_submission',
+      title: {
+        type: 'plain_text',
+        text: '주문하기',
+      },
+      submit: {
+        type: 'plain_text',
+        text: '주문',
+      },
+      blocks: [
+        {
+          type: 'input',
+          block_id: 'menu',
+          element: {
+            type: 'static_select',
+            action_id: 'menu_input',
+            placeholder: {
+              type: 'plain_text',
+              text: '메뉴를 선택해주세요',
+            },
+            options: menuConfig.menus.map((menu) => ({
+              text: { type: 'plain_text', text: menu.text },
+              value: menu.value,
+            })),
+          },
+          label: {
+            type: 'plain_text',
+            text: '메뉴',
+          },
+        },
+        {
+          type: 'input',
+          block_id: 'temperature',
+          element: {
+            type: 'radio_buttons',
+            action_id: 'temperature_input',
+            options: menuConfig.temperatureOptions.map((temp) => ({
+              text: { type: 'plain_text', text: temp.text },
+              value: temp.value,
+            })),
+          },
+          label: {
+            type: 'plain_text',
+            text: '온도',
+          },
+        },
+        {
+          type: 'input',
+          block_id: 'bean_option',
+          element: {
+            type: 'radio_buttons',
+            action_id: 'bean_option_input',
+            options: menuConfig.beanOptions.map((bean) => ({
+              text: { type: 'plain_text', text: bean.text },
+              value: bean.value,
+            })),
+          },
+          label: {
+            type: 'plain_text',
+            text: '원두 옵션',
+          },
+          optional: true,
+        },
+        {
+          type: 'input',
+          block_id: 'extra_options',
+          element: {
+            type: 'checkboxes',
+            action_id: 'extra_options_input',
+            options: menuConfig.extraOptions.map((option) => ({
+              text: { type: 'plain_text', text: option.text },
+              value: option.value,
+            })),
+          },
+          label: {
+            type: 'plain_text',
+            text: '기타 옵션',
+          },
+          optional: true,
+        },
+        {
+          type: 'input',
+          block_id: 'options',
+          element: {
+            type: 'plain_text_input',
+            action_id: 'options_input',
+            multiline: true,
+          },
+          label: {
+            type: 'plain_text',
+            text: '추가 요청사항',
+          },
+          optional: true,
+        },
+      ],
+      private_metadata: channel_id,
+    },
+  };
+}
+
+// 주문 텍스트 생성 함수
+function createOrderText(orderData) {
+  const { userId, menu, temperature, beanOption, extraOptions, options } =
+    orderData;
+  const selectedMenu = menuConfig.menus.find((m) => m.value === menu);
+  const needsBeanOption = menuConfig.categoriesNeedingBeanOption.includes(
+    selectedMenu.category
+  );
+
+  const orderParts = [
+    `<@${userId}>`,
+    temperature === 'hot' ? 'HOT' : 'ICE',
+    menu,
+  ];
+
+  if (needsBeanOption) {
+    const beanOptionText =
+      menuConfig.beanOptions.find((b) => b.value === beanOption)?.text ||
+      '다크(기본)';
+    orderParts.push(beanOptionText);
+  }
+
+  if (extraOptions && extraOptions.length > 0) {
+    const extraOptionsText = extraOptions
+      .map(
+        (optValue) =>
+          menuConfig.extraOptions.find((o) => o.value === optValue)?.text
+      )
+      .filter(Boolean)
+      .join('+');
+    if (extraOptionsText) {
+      orderParts.push(extraOptionsText);
+    }
+  }
+
+  if (options) {
+    orderParts.push(`(${options})`);
+  }
+
+  return orderParts.join(' ');
+}
+
+// 주문하기 버튼 클릭 핸들러
+async function handleOrderButton({ body, client, respond }) {
+  logger.info('Order button clicked:', { body });
+
+  try {
+    const isActive = await orderManager.isActiveSession(body.channel.id);
+
+    if (!isActive) {
+      await respond({
+        text: errorMessages.noActiveSession,
+        response_type: 'ephemeral',
+      });
+      return;
+    }
+
+    logger.info('Opening modal with trigger_id:', body.trigger_id);
+    const result = await client.views.open(
+      createOrderModal(body.trigger_id, body.channel.id)
+    );
+    logger.info('Modal opened successfully:', result);
+  } catch (error) {
+    logger.error('모달 열기 실패:', error);
+    await respond({
+      text: '주문 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
+      response_type: 'ephemeral',
+    });
+  }
+}
+
+// 주문 제출 핸들러
+async function handleOrderSubmission({ ack, body, view, client }) {
+  try {
+    await ack();
+
+    const channelId = view.private_metadata;
+    const session = await orderManager.getSession(channelId);
+
+    if (!session || !(await orderManager.isActiveSession(channelId))) {
+      logger.error('주문 세션이 유효하지 않습니다');
+      return;
+    }
+
+    const orderData = {
+      userId: body.user.id,
+      menu: view.state.values.menu.menu_input.selected_option.value,
+      temperature:
+        view.state.values.temperature.temperature_input.selected_option.value,
+      beanOption:
+        view.state.values.bean_option.bean_option_input.selected_option
+          ?.value || 'dark',
+      extraOptions: (
+        view.state.values.extra_options.extra_options_input.selected_options ||
+        []
+      ).map((opt) => opt.value),
+      options: view.state.values.options.options_input.value,
+    };
+
+    const orderText = createOrderText(orderData);
+
+    // 스레드에 주문 내용 추가
+    await client.chat.postMessage({
+      channel: channelId,
+      thread_ts: session.messageTs,
+      text: orderText,
+    });
+
+    // 주문 데이터 저장
+    await orderManager.addOrder(channelId, orderData);
+  } catch (error) {
+    logger.error('주문 처리 실패:', error);
+  }
+}
+
 // 핸들러 설정 함수
 const setupHandlers = (app) => {
   // 주문시작 명령어 처리
@@ -219,229 +439,10 @@ const setupHandlers = (app) => {
   });
 
   // 주문하기 버튼 액션
-  app.action('order_button', async ({ body, ack, client, respond }) => {
-    logger.info('Order button clicked:', { body });
-
-    try {
-      // Check active session first
-      const isActive = await orderManager.isActiveSession(body.channel.id);
-
-      if (!isActive) {
-        await respond({
-          text: errorMessages.noActiveSession,
-          response_type: 'ephemeral',
-        });
-        return;
-      }
-
-      logger.info('Opening modal with trigger_id:', body.trigger_id);
-
-      const result = await client.views.open({
-        trigger_id: body.trigger_id,
-        view: {
-          type: 'modal',
-          callback_id: 'order_submission',
-          title: {
-            type: 'plain_text',
-            text: '주문하기',
-          },
-          submit: {
-            type: 'plain_text',
-            text: '주문',
-          },
-          blocks: [
-            {
-              type: 'input',
-              block_id: 'menu',
-              element: {
-                type: 'static_select',
-                action_id: 'menu_input',
-                placeholder: {
-                  type: 'plain_text',
-                  text: '메뉴를 선택해주세요',
-                },
-                options: menuConfig.menus.map((menu) => ({
-                  text: { type: 'plain_text', text: menu.text },
-                  value: menu.value,
-                })),
-              },
-              label: {
-                type: 'plain_text',
-                text: '메뉴',
-              },
-            },
-            {
-              type: 'input',
-              block_id: 'temperature',
-              element: {
-                type: 'radio_buttons',
-                action_id: 'temperature_input',
-                options: menuConfig.temperatureOptions.map((temp) => ({
-                  text: { type: 'plain_text', text: temp.text },
-                  value: temp.value,
-                })),
-              },
-              label: {
-                type: 'plain_text',
-                text: '온도',
-              },
-            },
-            {
-              type: 'input',
-              block_id: 'bean_option',
-              element: {
-                type: 'radio_buttons',
-                action_id: 'bean_option_input',
-                options: menuConfig.beanOptions.map((bean) => ({
-                  text: { type: 'plain_text', text: bean.text },
-                  value: bean.value,
-                })),
-              },
-              label: {
-                type: 'plain_text',
-                text: '원두 옵션',
-              },
-              optional: true,
-            },
-            {
-              type: 'input',
-              block_id: 'extra_options',
-              element: {
-                type: 'checkboxes',
-                action_id: 'extra_options_input',
-                options: menuConfig.extraOptions.map((option) => ({
-                  text: { type: 'plain_text', text: option.text },
-                  value: option.value,
-                })),
-              },
-              label: {
-                type: 'plain_text',
-                text: '기타 옵션',
-              },
-              optional: true,
-            },
-            {
-              type: 'input',
-              block_id: 'options',
-              element: {
-                type: 'plain_text_input',
-                action_id: 'options_input',
-                multiline: true,
-              },
-              label: {
-                type: 'plain_text',
-                text: '추가 요청사항',
-              },
-              optional: true,
-            },
-          ],
-          private_metadata: body.channel.id,
-        },
-      });
-
-      logger.info('Modal opened successfully:', result);
-    } catch (error) {
-      logger.error('모달 열기 실패:', {
-        error: error.message,
-        stack: error.stack,
-        body: body,
-      });
-
-      // 사용자에게 에러 메시지 전송
-      await respond({
-        text: '주문 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
-        response_type: 'ephemeral',
-      });
-    }
-  });
+  app.action('order_button', handleOrderButton);
 
   // 주문 제출 처리
-  app.view('order_submission', async ({ ack, body, view, client }) => {
-    try {
-      await ack();
-
-      const channelId = view.private_metadata;
-      const session = await orderManager.getSession(channelId);
-
-      if (!session || !(await orderManager.isActiveSession(channelId))) {
-        logger.error('주문 세션이 유효하지 않습니다');
-        return;
-      }
-
-      const userId = body.user.id;
-      const menu = view.state.values.menu.menu_input.selected_option.value;
-      const temperature =
-        view.state.values.temperature.temperature_input.selected_option.value;
-      const beanOption =
-        view.state.values.bean_option.bean_option_input.selected_option
-          ?.value || 'dark';
-      const extraOptions =
-        view.state.values.extra_options.extra_options_input.selected_options ||
-        [];
-      const options = view.state.values.options.options_input.value;
-
-      // 선택된 메뉴의 카테고리 찾기
-      const selectedMenu = menuConfig.menus.find((m) => m.value === menu);
-      const needsBeanOption = menuConfig.categoriesNeedingBeanOption.includes(
-        selectedMenu.category
-      );
-
-      // 온도 텍스트
-      const temperatureKorean = temperature === 'hot' ? '따뜻한' : '아이스';
-
-      // 주문 내역 텍스트 생성
-      let orderParts = [`<@${userId}>`, temperatureKorean, menu];
-
-      // 원두 옵션이 필요한 메뉴인 경우에만 원두 옵션 추가
-      if (needsBeanOption) {
-        const beanOptionText =
-          menuConfig.beanOptions.find((b) => b.value === beanOption)?.text ||
-          '다크(기본)';
-        orderParts.push(beanOptionText);
-      }
-
-      // 기타 옵션이 있는 경우 추가
-      if (extraOptions.length > 0) {
-        const extraOptionsText = extraOptions
-          .map(
-            (opt) =>
-              menuConfig.extraOptions.find((o) => o.value === opt.value)?.text
-          )
-          .filter(Boolean)
-          .join('+');
-        if (extraOptionsText) {
-          orderParts.push(extraOptionsText);
-        }
-      }
-
-      // 요청사항이 있는 경우 추가
-      if (options) {
-        orderParts.push(`(${options})`);
-      }
-
-      // 주문 텍스트 생성 (공백으로 구분)
-      const orderText = orderParts.join(' ');
-
-      // 스레드에 주문 내용 추가
-      await client.chat.postMessage({
-        channel: channelId,
-        thread_ts: session.messageTs,
-        text: orderText,
-      });
-
-      // 주문 데이터 저장
-      await orderManager.addOrder(channelId, {
-        userId,
-        menu,
-        temperature,
-        beanOption,
-        extraOptions: extraOptions.map((opt) => opt.value),
-        options,
-      });
-    } catch (error) {
-      logger.error('주문 처리 실패:', error);
-    }
-  });
+  app.view('order_submission', handleOrderSubmission);
 };
 
 // Vercel 함수 핸들러
