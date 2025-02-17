@@ -1,7 +1,7 @@
 const { App, LogLevel } = require('@slack/bolt');
 const orderManager = require('../lib/orderSession');
 const menuConfig = require('../lib/menuConfig');
-const { getTutorialBlocks, errorMessages } = require('./blocks/tutorial');
+const { getTutorialBlocks, errorMessages } = require('../blocks/tutorial');
 
 // 로깅 함수
 const logger = {
