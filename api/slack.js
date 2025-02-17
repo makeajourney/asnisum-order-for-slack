@@ -1,5 +1,6 @@
 const { App, LogLevel } = require('@slack/bolt');
 const orderManager = require('../lib/orderSession');
+const menuConfig = require('../lib/menuConfig');
 
 // 로깅 함수
 const logger = {
@@ -125,21 +126,58 @@ const setupHandlers = (app) => {
 
       if (session.orders.length === 0) {
         await respond({
-          text: '아직 접수된 주문이 없습니다.',
-          response_type: 'ephemeral',
+          text: '접수된 주문이 없습니다. 주문 세션을 종료합니다.',
+          response_type: 'in_channel',
         });
+        await orderManager.clearSession(command.channel_id);
         return;
       }
 
       // 주문 내역 정리
-      let summary = '*오늘의 주문 내역*\n\n';
+      let summary = '*주문 내역 정리*\n\n';
       for (const order of session.orders) {
-        summary += `• <@${order.userId}>\n`;
-        summary += `  - 메뉴: ${order.menu}\n`;
-        if (order.options) {
-          summary += `  - 요청사항: ${order.options}\n`;
+        const selectedMenu = menuConfig.menus.find(
+          (m) => m.value === order.menu
+        );
+        const needsBeanOption = menuConfig.categoriesNeedingBeanOption.includes(
+          selectedMenu.category
+        );
+
+        // 주문 내역 부분 조합
+        let orderParts = [
+          `<@${order.userId}>`,
+          order.temperature === 'hot' ? 'HOT' : 'ICE',
+          order.menu,
+        ];
+
+        // 원두 옵션 (필요한 경우만)
+        if (needsBeanOption) {
+          const beanOptionText =
+            menuConfig.beanOptions.find((b) => b.value === order.beanOption)
+              ?.text || '다크(기본)';
+          orderParts.push(beanOptionText);
         }
-        summary += '\n';
+
+        // 기타 옵션
+        if (order.extraOptions && order.extraOptions.length > 0) {
+          const extraOptionsText = order.extraOptions
+            .map(
+              (optValue) =>
+                menuConfig.extraOptions.find((o) => o.value === optValue)?.text
+            )
+            .filter(Boolean)
+            .join('+');
+          if (extraOptionsText) {
+            orderParts.push(extraOptionsText);
+          }
+        }
+
+        // 요청사항
+        if (order.options) {
+          orderParts.push(`(${order.options})`);
+        }
+
+        summary += orderParts.join(' ') + '\n';
       }
 
       // 스레드에 정리 내용 추가
@@ -171,6 +209,8 @@ const setupHandlers = (app) => {
     logger.info('Order button clicked:', { body });
 
     try {
+      await ack();
+
       // Check active session first
       const isActive = await orderManager.isActiveSession(body.channel.id);
 
@@ -183,6 +223,7 @@ const setupHandlers = (app) => {
       }
 
       logger.info('Opening modal with trigger_id:', body.trigger_id);
+
       const result = await client.views.open({
         trigger_id: body.trigger_id,
         view: {
@@ -201,13 +242,71 @@ const setupHandlers = (app) => {
               type: 'input',
               block_id: 'menu',
               element: {
-                type: 'plain_text_input',
+                type: 'static_select',
                 action_id: 'menu_input',
+                placeholder: {
+                  type: 'plain_text',
+                  text: '메뉴를 선택해주세요',
+                },
+                options: menuConfig.menus.map((menu) => ({
+                  text: { type: 'plain_text', text: menu.text },
+                  value: menu.value,
+                })),
               },
               label: {
                 type: 'plain_text',
                 text: '메뉴',
               },
+            },
+            {
+              type: 'input',
+              block_id: 'temperature',
+              element: {
+                type: 'radio_buttons',
+                action_id: 'temperature_input',
+                options: menuConfig.temperatureOptions.map((temp) => ({
+                  text: { type: 'plain_text', text: temp.text },
+                  value: temp.value,
+                })),
+              },
+              label: {
+                type: 'plain_text',
+                text: '온도',
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'bean_option',
+              element: {
+                type: 'radio_buttons',
+                action_id: 'bean_option_input',
+                options: menuConfig.beanOptions.map((bean) => ({
+                  text: { type: 'plain_text', text: bean.text },
+                  value: bean.value,
+                })),
+              },
+              label: {
+                type: 'plain_text',
+                text: '원두 옵션',
+              },
+              optional: true,
+            },
+            {
+              type: 'input',
+              block_id: 'extra_options',
+              element: {
+                type: 'checkboxes',
+                action_id: 'extra_options_input',
+                options: menuConfig.extraOptions.map((option) => ({
+                  text: { type: 'plain_text', text: option.text },
+                  value: option.value,
+                })),
+              },
+              label: {
+                type: 'plain_text',
+                text: '기타 옵션',
+              },
+              optional: true,
             },
             {
               type: 'input',
@@ -227,6 +326,7 @@ const setupHandlers = (app) => {
           private_metadata: body.channel.id,
         },
       });
+
       logger.info('Modal opened successfully:', result);
     } catch (error) {
       logger.error('모달 열기 실패:', {
@@ -243,7 +343,7 @@ const setupHandlers = (app) => {
     }
   });
 
-  // 주문 모달 제출
+  // 주문 제출 처리
   app.view('order_submission', async ({ ack, body, view, client }) => {
     try {
       const channelId = view.private_metadata;
@@ -255,20 +355,73 @@ const setupHandlers = (app) => {
       }
 
       const userId = body.user.id;
-      const menu = view.state.values.menu.menu_input.value;
+      const menu = view.state.values.menu.menu_input.selected_option.value;
+      const temperature =
+        view.state.values.temperature.temperature_input.selected_option.value;
+      const beanOption =
+        view.state.values.bean_option.bean_option_input.selected_option
+          ?.value || 'dark';
+      const extraOptions =
+        view.state.values.extra_options.extra_options_input.selected_options ||
+        [];
       const options = view.state.values.options.options_input.value;
+
+      // 선택된 메뉴의 카테고리 찾기
+      const selectedMenu = menuConfig.menus.find((m) => m.value === menu);
+      const needsBeanOption = menuConfig.categoriesNeedingBeanOption.includes(
+        selectedMenu.category
+      );
+
+      // 온도 텍스트
+      const temperatureKorean = temperature === 'hot' ? '따뜻한' : '아이스';
+
+      // 주문 내역 텍스트 생성
+      let orderParts = [`<@${userId}>`, temperatureKorean, menu];
+
+      // 원두 옵션이 필요한 메뉴인 경우에만 원두 옵션 추가
+      if (needsBeanOption) {
+        const beanOptionText =
+          menuConfig.beanOptions.find((b) => b.value === beanOption)?.text ||
+          '다크(기본)';
+        orderParts.push(beanOptionText);
+      }
+
+      // 기타 옵션이 있는 경우 추가
+      if (extraOptions.length > 0) {
+        const extraOptionsText = extraOptions
+          .map(
+            (opt) =>
+              menuConfig.extraOptions.find((o) => o.value === opt.value)?.text
+          )
+          .filter(Boolean)
+          .join('+');
+        if (extraOptionsText) {
+          orderParts.push(extraOptionsText);
+        }
+      }
+
+      // 요청사항이 있는 경우 추가
+      if (options) {
+        orderParts.push(`(${options})`);
+      }
+
+      // 주문 텍스트 생성 (공백으로 구분)
+      const orderText = orderParts.join(' ');
 
       // 스레드에 주문 내용 추가
       await client.chat.postMessage({
         channel: channelId,
         thread_ts: session.messageTs,
-        text: `<@${userId}>님의 주문:\n*메뉴*: ${menu}\n*요청사항*: ${options || '없음'}`,
+        text: orderText,
       });
 
       // 주문 데이터 저장
       await orderManager.addOrder(channelId, {
         userId,
         menu,
+        temperature,
+        beanOption,
+        extraOptions: extraOptions.map((opt) => opt.value),
         options,
       });
     } catch (error) {
