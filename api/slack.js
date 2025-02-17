@@ -266,6 +266,9 @@ module.exports = async (req, res) => {
     method: req.method,
     url: req.url,
     body: req.body,
+    headers: req.headers,
+    type: req.body?.type,
+    action: req.body?.action_id,
   });
 
   // Health check
