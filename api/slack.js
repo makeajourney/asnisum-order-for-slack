@@ -1,4 +1,4 @@
-const { getApp } = require('../lib/app');
+const { getApp, logger } = require('../lib/app');
 
 // Vercel 함수 핸들러
 module.exports = async (req, res) => {
