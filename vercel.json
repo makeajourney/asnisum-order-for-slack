@@ -11,5 +11,11 @@
       "src": "/(.*)",
       "dest": "/api/slack.js"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/order-start",
+      "schedule": "30 9 * * 3"
+    }
   ]
 }
