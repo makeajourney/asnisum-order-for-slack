@@ -2,6 +2,7 @@ const { App, LogLevel } = require('@slack/bolt');
 const orderManager = require('../lib/orderSession');
 const menuConfig = require('../lib/menuConfig');
 const { getTutorialBlocks, errorMessages } = require('../blocks/tutorial');
+const cron = require('node-cron');
 
 // 로깅 함수
 const logger = {
@@ -496,3 +497,16 @@ module.exports = async (req, res) => {
     });
   }
 };
+
+// 스케줄러 추가
+cron.schedule('30 9 * * 3', async () => {
+  try {
+    await app.client.chat.postMessage({
+      channel: 'C05UUE7SK7Y',
+      text: '/아즈니섬 주문시작',
+    });
+    console.log('아즈니섬 주문시작 명령어가 실행되었습니다.');
+  } catch (error) {
+    console.error('명령어 실행 중 오류 발생:', error);
+  }
+});
