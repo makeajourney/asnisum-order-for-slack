@@ -185,12 +185,7 @@ const setupHandlers = (app) => {
         channel: command.channel_id,
         thread_ts: session.messageTs,
         text: summary,
-      });
-
-      // 채널에도 동일한 내용 표시
-      await client.chat.postMessage({
-        channel: command.channel_id,
-        text: summary,
+        reply_broadcast: true,
       });
 
       // 세션 종료 및 삭제
