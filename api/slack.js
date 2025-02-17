@@ -217,8 +217,7 @@ async function handleOrderSubmission({ ack, body, view, client }) {
   try {
     if (typeof ack !== 'function') {
       logger.error('ack is not a function:', { ack });
-      // 기본 응답 처리
-      return { response_action: 'clear' };
+      throw new Error('Invalid ack function');
     }
 
     const channelId = view.private_metadata;
@@ -267,14 +266,13 @@ async function handleOrderSubmission({ ack, body, view, client }) {
   } catch (error) {
     logger.error('주문 처리 실패:', error);
     // 에러 발생 시에도 모달을 닫음
-    if (typeof ack === 'function') {
-      await ack({
-        response_action: 'errors',
-        errors: {
-          menu: '주문 처리 중 오류가 발생했습니다. 다시 시도해주세요.',
-        },
-      });
-    }
+
+    return await ack({
+      response_action: 'errors',
+      errors: {
+        menu: '주문 처리 중 오류가 발생했습니다. 다시 시도해주세요.',
+      },
+    });
   }
 }
 
@@ -458,9 +456,9 @@ module.exports = async (req, res) => {
       logger.info('Interactive payload received:', payload);
 
       if (payload.type === 'view_submission') {
-        const ackFn = async (response) => {
-          logger.info('Acknowledging view submission with response:', response);
-          return res.status(200).json(response);
+        const ackFn = (response) => {
+          logger.info('View submission response:', response);
+          return res.status(200).json(response || { response_action: 'clear' });
         };
 
         try {
@@ -472,8 +470,16 @@ module.exports = async (req, res) => {
             },
             headers: req.headers,
           });
+
+          // If no response was sent, send a default clear response
+          if (!res.headersSent) {
+            return res.status(200).json({ response_action: 'clear' });
+          }
         } catch (error) {
-          logger.error('View submission processing error:', error);
+          logger.error('View submission error:', {
+            error: error.message,
+            stack: error.stack,
+          });
           return res.status(200).json({
             response_action: 'errors',
             errors: {
