@@ -174,6 +174,9 @@ const setupHandlers = (app) => {
       await ack();
       logger.info('Order button action acknowledged');
 
+      // Check active session first
+      const isActive = await orderManager.isActiveSession(body.channel.id);
+
       if (!isActive) {
         await respond({
           text: '현재 진행 중인 주문이 없습니다. `/주문시작` 명령어로 새로운 주문을 시작해주세요.',
@@ -307,12 +310,21 @@ module.exports = async (req, res) => {
       const payload = JSON.parse(req.body.payload);
       logger.info('Interactive payload received:', payload);
 
+      // Manual acknowledge for interactive components
+      const ack = async () => {
+        logger.info('Acknowledging interactive action');
+        return Promise.resolve();
+      };
+
+      // Process the event with modified payload
       await app.processEvent({
-        body: payload,
+        body: {
+          ...payload,
+          ack,
+        },
         headers: req.headers,
       });
     } else {
-      // 일반 이벤트 처리
       await app.processEvent({
         body: req.body,
         headers: req.headers,
