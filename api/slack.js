@@ -213,32 +213,23 @@ async function handleOrderButton({ body, client, respond }) {
 }
 
 // 주문 제출 핸들러
-async function handleOrderSubmission({ ack, body, view, client }) {
+async function handleOrderSubmission({ body, view, client }) {
   try {
-    // Ensure ack is available
-    if (typeof ack !== 'function') {
-      logger.error('ack is not a function:', { ack });
-      return {
-        response_action: 'errors',
-        errors: { menu: '시스템 오류가 발생했습니다.' },
-      };
-    }
-
     const channelId = view.private_metadata;
     const session = await orderManager.getSession(channelId);
 
     if (!session || !(await orderManager.isActiveSession(channelId))) {
       logger.error('주문 세션이 유효하지 않습니다');
-      return await ack({
+      return {
         response_action: 'errors',
         errors: {
           menu: '주문 세션이 만료되었습니다. 새로운 주문을 시작해주세요.',
         },
-      });
+      };
     }
 
-    // 먼저 모달을 닫음
-    await ack({ response_action: 'clear' });
+    // Close the modal first
+    res.status(200).json(result);
 
     const orderData = {
       userId: body.user.id,
@@ -268,12 +259,12 @@ async function handleOrderSubmission({ ack, body, view, client }) {
     await orderManager.addOrder(channelId, orderData);
   } catch (error) {
     logger.error('Order submission error:', error);
-    return await ack({
+    return {
       response_action: 'errors',
       errors: {
         menu: '주문 처리 중 오류가 발생했습니다. 다시 시도해주세요.',
       },
-    });
+    };
   }
 }
 
@@ -457,26 +448,14 @@ module.exports = async (req, res) => {
       logger.info('Interactive payload received:', payload);
 
       if (payload.type === 'view_submission') {
-        let responded = false;
-
-        const ackFn = async (response) => {
-          logger.info('View submission response:', response);
-          return res.status(200).json(response);
-        };
-
         try {
           // 이벤트 처리
           await app.processEvent({
             body: {
               ...payload,
-              ack: ackFn,
             },
             headers: req.headers,
           });
-
-          if (!responded) {
-            return res.status(200).json({ response_action: 'clear' });
-          }
         } catch (error) {
           logger.error('View submission error:', {
             error: error.message,
@@ -491,34 +470,19 @@ module.exports = async (req, res) => {
         }
         return;
       } else {
-        // 다른 인터랙티브 컴포넌트에 대한 기본 ack
-        let responded = false;
-        const ack = async () => {
-          logger.info('Acknowledging interactive action');
-          return res.status(200).json({ ok: true });
-        };
-
         await app.processEvent({
           body: {
             ...payload,
-            ack,
           },
           headers: req.headers,
         });
-
-        if (!responded) {
-          return res.status(200).json({ ok: true });
-        }
       }
     } else {
       await app.processEvent({
         body: req.body,
         headers: req.headers,
       });
-      return res.status(200).json({ ok: true });
     }
-
-    return res.status(200).json({ ok: true });
   } catch (error) {
     logger.error('Handler error:', {
       error: error.message,
