@@ -453,8 +453,6 @@ module.exports = async (req, res) => {
             },
             headers: req.headers,
           });
-
-          res.status(200).send({ response_action: 'clear' });
         } catch (error) {
           logger.error('View submission error:', {
             error: error.message,
@@ -467,7 +465,7 @@ module.exports = async (req, res) => {
             },
           });
         }
-        return;
+        return res.status(200).send({ response_action: 'clear' });
       } else {
         await app.processEvent({
           body: {
@@ -482,6 +480,9 @@ module.exports = async (req, res) => {
         headers: req.headers,
       });
     }
+    return res.status(200).json({
+      ok: true,
+    });
   } catch (error) {
     logger.error('Handler error:', {
       error: error.message,
