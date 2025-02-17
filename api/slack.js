@@ -152,7 +152,7 @@ function createOrderText(orderData) {
 
   const orderParts = [
     `<@${userId}>`,
-    temperature === 'hot' ? 'HOT' : 'ICE',
+    temperature === 'hot' ? '따뜻한' : '아이스',
     menu,
   ];
 
@@ -284,7 +284,7 @@ const setupHandlers = (app) => {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: '*오늘의 주문*\n주문하실 분들은 아래 버튼을 눌러주세요.',
+            text: '*오늘의 주문*\n아즈니섬 음료를 주문하실 분들은 아래 버튼을 눌러주세요.',
           },
         },
         {
@@ -479,14 +479,36 @@ module.exports = async (req, res) => {
         return Promise.resolve();
       };
 
-      // Process the event with modified payload
-      await app.processEvent({
-        body: {
-          ...payload,
-          ack,
-        },
-        headers: req.headers,
-      });
+      if (payload.type === 'view_submission') {
+        // 모달 제출 처리
+        await app.processEvent({
+          body: {
+            ...payload,
+            ack: async (response) => {
+              logger.info(
+                'Acknowledging view submission with response:',
+                response
+              );
+              // 응답이 있는 경우 (예: 에러 메시지) 해당 응답을 반환
+              if (response) {
+                return res.status(200).json(response);
+              }
+              // 응답이 없는 경우 기본 성공 응답
+              return Promise.resolve();
+            },
+          },
+          headers: req.headers,
+        });
+      } else {
+        // 다른 인터랙티브 컴포넌트 처리
+        await app.processEvent({
+          body: {
+            ...payload,
+            ack,
+          },
+          headers: req.headers,
+        });
+      }
     } else {
       await app.processEvent({
         body: req.body,
