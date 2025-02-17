@@ -1,23 +1,58 @@
 const { App, VercelReceiver } = require('@slack/bolt');
 const orderManager = require('../lib/orderSession');
 
+// 로깅 함수
+const logger = {
+  error: (...args) => {
+    console.error(new Date().toISOString(), ...args);
+  },
+  info: (...args) => {
+    console.log(new Date().toISOString(), ...args);
+  }
+};
+
+// 리시버 생성 시 로깅
+logger.info('Creating Vercel receiver');
 const receiver = new VercelReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
   processBeforeResponse: true
 });
 
+// 앱 초기화 시 로깅
+logger.info('Initializing Slack app');
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   receiver
 });
 
-// 1. 주문 시작 명령어 처리
-app.command('/주문시작', async ({ command, ack, client, respond }) => {
-  await ack();
+// 미들웨어로 모든 요청 로깅
+app.use(async ({ payload, context, next }) => {
+  logger.info('Incoming request:', {
+    type: payload.type,
+    user: payload.user,
+    channel: payload.channel,
+    command: payload.command
+  });
+  await next();
+});
 
+// 주문 시작 명령어 처리
+app.command('/주문시작', async ({ command, ack, client, respond }) => {
+  logger.info('주문시작 command received:', command);
   try {
+    await ack();
+    logger.info('주문시작 acknowledged');
+
+    // 토큰 검증
+    if (!process.env.SLACK_BOT_TOKEN) {
+      throw new Error('SLACK_BOT_TOKEN is not set');
+    }
+
     // 이미 진행 중인 주문이 있는지 확인
-    if (await orderManager.isActiveSession(command.channel_id)) {
+    const isActive = await orderManager.isActiveSession(command.channel_id);
+    logger.info('Active session check:', { isActive, channelId: command.channel_id });
+
+    if (isActive) {
       await respond({
         text: "이미 진행 중인 주문이 있습니다. 먼저 `/마감` 명령어로 현재 주문을 마감해주세요.",
         response_type: 'ephemeral'
@@ -25,6 +60,7 @@ app.command('/주문시작', async ({ command, ack, client, respond }) => {
       return;
     }
 
+    logger.info('Sending initial message');
     const result = await client.chat.postMessage({
       channel: command.channel_id,
       text: "오늘의 주문을 받습니다! 🍱",
@@ -52,16 +88,27 @@ app.command('/주문시작', async ({ command, ack, client, respond }) => {
         }
       ]
     });
+    logger.info('Message sent successfully:', result);
 
     // 새 세션 시작
     await orderManager.startSession(command.channel_id, result.ts);
+    logger.info('New session started');
 
   } catch (error) {
-    console.error('메시지 발송 실패:', error);
-    await respond({
-      text: "주문 시작 중 오류가 발생했습니다.",
-      response_type: 'ephemeral'
+    logger.error('주문시작 error:', {
+      error: error.message,
+      stack: error.stack,
+      command: command
     });
+    
+    try {
+      await respond({
+        text: `주문 시작 중 오류가 발생했습니다. (${error.message})`,
+        response_type: 'ephemeral'
+      });
+    } catch (respondError) {
+      logger.error('Failed to send error response:', respondError);
+    }
   }
 });
 
@@ -223,8 +270,34 @@ app.command('/마감', async ({ command, ack, client, respond }) => {
   }
 });
 
-// Vercel 함수 핸들러
+// 에러 핸들러
+app.error(async (error) => {
+  logger.error('Global error handler:', {
+    message: error.message,
+    stack: error.stack,
+    code: error.code
+  });
+});
+  
+  // Vercel 함수 핸들러
 module.exports = async (req, res) => {
-  await receiver.start();
-  return await receiver.handleRequest(req, res);
+  logger.info('Received request:', {
+    method: req.method,
+    url: req.url,
+    headers: req.headers
+  });
+
+  try {
+    await receiver.start();
+    logger.info('Receiver started');
+    const result = await receiver.handleRequest(req, res);
+    logger.info('Request handled successfully');
+    return result;
+  } catch (error) {
+    logger.error('Handler error:', {
+      error: error.message,
+      stack: error.stack
+    });
+    throw error;
+  }
 };
