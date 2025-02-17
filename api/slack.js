@@ -324,7 +324,7 @@ const setupHandlers = (app) => {
 
     if (session.orders.length === 0) {
       await respond({
-        text: '접수된 주문이 없습니다. 주문 세션을 종료합니다.',
+        text: errorMessages.noOrders,
         response_type: 'in_channel',
       });
       await orderManager.clearSession(command.channel_id);
@@ -333,47 +333,10 @@ const setupHandlers = (app) => {
 
     // 주문 내역 정리
     let summary = '*주문 내역 정리*\n\n';
+    summary += `총 ${session.orders.length}건의 주문이 있습니다.\n\n`;
+
     for (const order of session.orders) {
-      const selectedMenu = menuConfig.menus.find((m) => m.value === order.menu);
-      const needsBeanOption = menuConfig.categoriesNeedingBeanOption.includes(
-        selectedMenu.category
-      );
-
-      // 주문 내역 부분 조합
-      let orderParts = [
-        `<@${order.userId}>`,
-        order.temperature === 'hot' ? 'HOT' : 'ICE',
-        order.menu,
-      ];
-
-      // 원두 옵션 (필요한 경우만)
-      if (needsBeanOption) {
-        const beanOptionText =
-          menuConfig.beanOptions.find((b) => b.value === order.beanOption)
-            ?.text || '다크(기본)';
-        orderParts.push(beanOptionText);
-      }
-
-      // 기타 옵션
-      if (order.extraOptions && order.extraOptions.length > 0) {
-        const extraOptionsText = order.extraOptions
-          .map(
-            (optValue) =>
-              menuConfig.extraOptions.find((o) => o.value === optValue)?.text
-          )
-          .filter(Boolean)
-          .join('+');
-        if (extraOptionsText) {
-          orderParts.push(extraOptionsText);
-        }
-      }
-
-      // 요청사항
-      if (order.options) {
-        orderParts.push(`(${order.options})`);
-      }
-
-      summary += orderParts.join(' ') + '\n';
+      summary += createOrderText(order) + '\n';
     }
 
     // 스레드에 정리 내용 추가
