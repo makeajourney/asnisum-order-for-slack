@@ -1,6 +1,7 @@
 const { App, LogLevel } = require('@slack/bolt');
 const orderManager = require('../lib/orderSession');
 const menuConfig = require('../lib/menuConfig');
+const { getTutorialBlocks, errorMessages } = require('./blocks/tutorial');
 
 // 로깅 함수
 const logger = {
@@ -38,7 +39,7 @@ const getApp = () => {
 // 핸들러 설정 함수
 const setupHandlers = (app) => {
   // 주문시작 명령어
-  app.command('/주문시작', async ({ command, client, respond }) => {
+  app.command('/아즈니섬 주문시작', async ({ command, client, respond }) => {
     logger.info('주문시작 command received:', command);
     try {
       // 토큰 검증
@@ -55,7 +56,7 @@ const setupHandlers = (app) => {
 
       if (isActive) {
         await respond({
-          text: '이미 진행 중인 주문이 있습니다. 먼저 `/마감` 명령어로 현재 주문을 마감해주세요.',
+          text: errorMessages.activeSession,
           response_type: 'ephemeral',
         });
         return;
@@ -109,7 +110,7 @@ const setupHandlers = (app) => {
   });
 
   // 마감 명령어
-  app.command('/마감', async ({ command, client, respond }) => {
+  app.command('/아즈니섬 주문마감', async ({ command, client, respond }) => {
     try {
       const session = await orderManager.getSession(command.channel_id);
 
@@ -199,6 +200,18 @@ const setupHandlers = (app) => {
     }
   });
 
+  app.command('/아즈니섬 도움말', async ({ command, ack, client }) => {
+    await ack();
+    try {
+      await client.chat.postMessage({
+        channel: command.channel_id,
+        blocks: getTutorialBlocks(),
+      });
+    } catch (error) {
+      logger.error('도움말 표시 실패:', error);
+    }
+  });
+
   // 주문하기 버튼 액션
   app.action('order_button', async ({ body, ack, client, respond }) => {
     logger.info('Order button clicked:', { body });
@@ -209,7 +222,7 @@ const setupHandlers = (app) => {
 
       if (!isActive) {
         await respond({
-          text: '현재 진행 중인 주문이 없습니다. `/주문시작` 명령어로 새로운 주문을 시작해주세요.',
+          text: errorMessages.noActiveSession,
           response_type: 'ephemeral',
         });
         return;
