@@ -1,4 +1,4 @@
-const { App, VercelReceiver } = require('@slack/bolt');
+const { App } = require('@slack/bolt');
 const orderManager = require('../lib/orderSession');
 
 // 로깅 함수
@@ -26,18 +26,12 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // 리시버 생성
-    logger.info('Creating Express receiver');
-    const receiver = new ExpressReceiver({
-      signingSecret: process.env.SLACK_SIGNING_SECRET,
-      processBeforeResponse: true
-    });
-
     // 앱 초기화
     logger.info('Initializing Slack app');
     const app = new App({
       token: process.env.SLACK_BOT_TOKEN,
-      receiver
+      signingSecret: process.env.SLACK_SIGNING_SECRET,
+      processBeforeResponse: true
     });
 
     // 미들웨어로 모든 요청 로깅
@@ -295,8 +289,31 @@ module.exports = async (req, res) => {
     });
 
     // 요청 처리
-    // Express receiver의 app 객체를 사용하여 요청 처리
-    return await receiver.app(req, res);
+    const payload = req.body;
+    let result;
+
+    // 슬래시 커맨드 처리
+    if (payload.command) {
+      if (payload.command === '/주문시작') {
+        result = await app.handleCommand(payload);
+      } else if (payload.command === '/마감') {
+        result = await app.handleCommand(payload);
+      }
+    }
+    // 상호작용 처리
+    else if (payload.type === 'block_actions') {
+      result = await app.handleIncomingInteraction(payload);
+    }
+    // 모달 제출 처리
+    else if (payload.type === 'view_submission') {
+      result = await app.handleViewSubmission(payload);
+    }
+
+    if (!result) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    return res.status(200).json(result);
 
   } catch (error) {
     logger.error('Handler error:', error);
