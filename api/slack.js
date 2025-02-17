@@ -498,15 +498,22 @@ module.exports = async (req, res) => {
   }
 };
 
-// 스케줄러 추가
+// 스케줄러 코드 수정
 cron.schedule('30 9 * * 3', async () => {
   try {
-    await app.client.chat.postMessage({
-      channel: 'C05UUE7SK7Y',
-      text: '/아즈니섬 주문시작',
+    const app = getApp();
+    await handleOrderStart({
+      command: { channel_id: 'C05UUE7SK7Y' },
+      client: app.client,
+      respond: async (message) => {
+        await app.client.chat.postMessage({
+          channel: 'C05UUE7SK7Y',
+          ...message,
+        });
+      },
     });
-    console.log('아즈니섬 주문시작 명령어가 실행되었습니다.');
+    logger.info('스케줄된 주문시작이 실행되었습니다.');
   } catch (error) {
-    console.error('명령어 실행 중 오류 발생:', error);
+    logger.error('스케줄된 주문시작 실행 중 오류 발생:', error);
   }
 });
