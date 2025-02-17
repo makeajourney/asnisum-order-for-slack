@@ -215,9 +215,9 @@ async function handleOrderButton({ body, client, respond }) {
 // 주문 제출 핸들러
 async function handleOrderSubmission({ ack, body, view, client }) {
   try {
-    if (typeof ack === 'function') {
-      await ack();
-    }
+    await ack({
+      response_action: 'clear',
+    });
 
     const channelId = view.private_metadata;
     const session = await orderManager.getSession(channelId);
@@ -255,6 +255,12 @@ async function handleOrderSubmission({ ack, body, view, client }) {
     await orderManager.addOrder(channelId, orderData);
   } catch (error) {
     logger.error('주문 처리 실패:', error);
+    // 에러 발생 시에도 모달을 닫음
+    if (typeof ack === 'function') {
+      await ack({
+        response_action: 'clear',
+      });
+    }
   }
 }
 
