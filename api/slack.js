@@ -215,15 +215,23 @@ async function handleOrderButton({ body, client, respond }) {
 // 주문 제출 핸들러
 async function handleOrderSubmission({ ack, body, view, client }) {
   try {
-    await ack({
-      response_action: 'clear',
-    });
+    if (typeof ack !== 'function') {
+      logger.error('ack is not a function:', { ack });
+      // 기본 응답 처리
+      return { response_action: 'clear' };
+    }
 
     const channelId = view.private_metadata;
     const session = await orderManager.getSession(channelId);
 
     if (!session || !(await orderManager.isActiveSession(channelId))) {
       logger.error('주문 세션이 유효하지 않습니다');
+      await ack({
+        response_action: 'errors',
+        errors: {
+          menu: '주문 세션이 만료되었습니다. 새로운 주문을 시작해주세요.',
+        },
+      });
       return;
     }
 
@@ -242,6 +250,9 @@ async function handleOrderSubmission({ ack, body, view, client }) {
       options: view.state.values.options.options_input.value,
     };
 
+    // 먼저 모달을 닫음
+    await ack({ response_action: 'clear' });
+
     const orderText = createOrderText(orderData);
 
     // 스레드에 주문 내용 추가
@@ -258,7 +269,10 @@ async function handleOrderSubmission({ ack, body, view, client }) {
     // 에러 발생 시에도 모달을 닫음
     if (typeof ack === 'function') {
       await ack({
-        response_action: 'clear',
+        response_action: 'errors',
+        errors: {
+          menu: '주문 처리 중 오류가 발생했습니다. 다시 시도해주세요.',
+        },
       });
     }
   }
@@ -444,27 +458,29 @@ module.exports = async (req, res) => {
       logger.info('Interactive payload received:', payload);
 
       if (payload.type === 'view_submission') {
-        // view_submission 이벤트에 대한 특별한 ack 함수 정의
         const ackFn = async (response) => {
           logger.info('Acknowledging view submission with response:', response);
-          // 응답이 있는 경우 (예: 에러 메시지) 해당 응답을 반환
-          if (response) {
-            return res.status(200).json(response);
-          }
-          // 응답이 없는 경우 기본 성공 응답
-          return res.status(200).json({ response_action: 'clear' });
+          return res.status(200).json(response);
         };
 
-        // 이벤트 처리
-        await app.processEvent({
-          body: {
-            ...payload,
-            ack: ackFn,
-          },
-          headers: req.headers,
-        });
-
-        // 여기서 바로 응답을 보내지 않음
+        try {
+          // 이벤트 처리
+          await app.processEvent({
+            body: {
+              ...payload,
+              ack: ackFn,
+            },
+            headers: req.headers,
+          });
+        } catch (error) {
+          logger.error('View submission processing error:', error);
+          return res.status(200).json({
+            response_action: 'errors',
+            errors: {
+              menu: '처리 중 오류가 발생했습니다. 다시 시도해주세요.',
+            },
+          });
+        }
         return;
       } else {
         // 다른 인터랙티브 컴포넌트에 대한 기본 ack
