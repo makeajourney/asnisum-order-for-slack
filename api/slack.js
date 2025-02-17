@@ -20,7 +20,13 @@ const getApp = () => {
       token: process.env.SLACK_BOT_TOKEN,
       signingSecret: process.env.SLACK_SIGNING_SECRET,
       processBeforeResponse: true,
+      socketMode: false,
     });
+
+    // 핸들러 설정 전에 토큰 확인
+    if (!process.env.SLACK_BOT_TOKEN || !process.env.SLACK_SIGNING_SECRET) {
+      throw new Error('Required Slack credentials are missing');
+    }
 
     // 명령어 핸들러들을 설정
     setupHandlers(app);
@@ -162,11 +168,13 @@ const setupHandlers = (app) => {
 
   // 주문하기 버튼 액션
   app.action('order_button', async ({ body, ack, client, respond }) => {
-    await ack();
+    logger.info('Order button clicked:', { body });
 
     try {
-      // 활성 세션 확인
-      if (!(await orderManager.isActiveSession(body.channel.id))) {
+      await ack();
+      logger.info('Order button action acknowledged');
+
+      if (!isActive) {
         await respond({
           text: '현재 진행 중인 주문이 없습니다. `/주문시작` 명령어로 새로운 주문을 시작해주세요.',
           response_type: 'ephemeral',
@@ -174,7 +182,8 @@ const setupHandlers = (app) => {
         return;
       }
 
-      await client.views.open({
+      logger.info('Opening modal with trigger_id:', body.trigger_id);
+      const result = await client.views.open({
         trigger_id: body.trigger_id,
         view: {
           type: 'modal',
@@ -218,8 +227,19 @@ const setupHandlers = (app) => {
           private_metadata: body.channel.id,
         },
       });
+      logger.info('Modal opened successfully:', result);
     } catch (error) {
-      logger.error('모달 열기 실패:', error);
+      logger.error('모달 열기 실패:', {
+        error: error.message,
+        stack: error.stack,
+        body: body,
+      });
+
+      // 사용자에게 에러 메시지 전송
+      await respond({
+        text: '주문 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
+        response_type: 'ephemeral',
+      });
     }
   });
 
@@ -265,8 +285,6 @@ module.exports = async (req, res) => {
   logger.info('Request received:', {
     method: req.method,
     url: req.url,
-    body: req.body,
-    headers: req.headers,
     type: req.body?.type,
     action: req.body?.action_id,
   });
@@ -292,8 +310,11 @@ module.exports = async (req, res) => {
     logger.error('Handler error:', {
       error: error.message,
       stack: error.stack,
+      body: req.body,
     });
-    return res.status(500).json({
+
+    // 500 에러 대신 200으로 응답 (Slack은 3초 이내 200 응답을 기대함)
+    return res.status(200).json({
       ok: false,
       error: error.message,
     });
