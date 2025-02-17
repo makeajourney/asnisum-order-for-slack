@@ -209,8 +209,6 @@ const setupHandlers = (app) => {
     logger.info('Order button clicked:', { body });
 
     try {
-      await ack();
-
       // Check active session first
       const isActive = await orderManager.isActiveSession(body.channel.id);
 
