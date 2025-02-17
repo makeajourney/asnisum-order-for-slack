@@ -38,177 +38,183 @@ const getApp = () => {
 
 // 핸들러 설정 함수
 const setupHandlers = (app) => {
-  // 주문시작 명령어
-  app.command('/아즈니섬 주문시작', async ({ command, client, respond }) => {
-    logger.info('주문시작 command received:', command);
-    try {
-      // 토큰 검증
-      if (!process.env.SLACK_BOT_TOKEN) {
-        throw new Error('SLACK_BOT_TOKEN is not set');
-      }
+  // 주문시작 명령어 처리
+  async function handleOrderStart({ command, client, respond }) {
+    // 이미 진행 중인 주문이 있는지 확인
+    const isActive = await orderManager.isActiveSession(command.channel_id);
+    logger.info('Active session check:', {
+      isActive,
+      channelId: command.channel_id,
+    });
 
-      // 이미 진행 중인 주문이 있는지 확인
-      const isActive = await orderManager.isActiveSession(command.channel_id);
-      logger.info('Active session check:', {
-        isActive,
-        channelId: command.channel_id,
+    if (isActive) {
+      await respond({
+        text: errorMessages.activeSession,
+        response_type: 'ephemeral',
       });
+      return;
+    }
 
-      if (isActive) {
-        await respond({
-          text: errorMessages.activeSession,
-          response_type: 'ephemeral',
-        });
-        return;
-      }
-
-      logger.info('Sending initial message');
-      const result = await client.chat.postMessage({
-        channel: command.channel_id,
-        text: '오늘의 주문을 받습니다! 🍱',
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: '*오늘의 주문*\n주문하실 분들은 아래 버튼을 눌러주세요.',
-            },
+    logger.info('Sending initial message');
+    const result = await client.chat.postMessage({
+      channel: command.channel_id,
+      text: '오늘의 주문을 받습니다! 🍱',
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: '*오늘의 주문*\n주문하실 분들은 아래 버튼을 눌러주세요.',
           },
-          {
-            type: 'actions',
-            elements: [
-              {
-                type: 'button',
-                text: {
-                  type: 'plain_text',
-                  text: '주문하기',
-                  emoji: true,
-                },
-                action_id: 'order_button',
+        },
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: {
+                type: 'plain_text',
+                text: '주문하기',
+                emoji: true,
               },
-            ],
-          },
-        ],
-      });
-      logger.info('Message sent successfully:', result);
+              action_id: 'order_button',
+            },
+          ],
+        },
+      ],
+    });
+    logger.info('Message sent successfully:', result);
 
-      // 새 세션 시작
-      await orderManager.startSession(command.channel_id, result.ts);
-      logger.info('New session started');
+    // 새 세션 시작
+    await orderManager.startSession(command.channel_id, result.ts);
+    logger.info('New session started');
+  }
+
+  // 주문마감 명령어 처리
+  async function handleOrderEnd({ command, client, respond }) {
+    const session = await orderManager.getSession(command.channel_id);
+
+    if (!session || !(await orderManager.isActiveSession(command.channel_id))) {
+      await respond({
+        text: '현재 진행 중인 주문이 없습니다.',
+        response_type: 'ephemeral',
+      });
+      return;
+    }
+
+    if (session.orders.length === 0) {
+      await respond({
+        text: '접수된 주문이 없습니다. 주문 세션을 종료합니다.',
+        response_type: 'in_channel',
+      });
+      await orderManager.clearSession(command.channel_id);
+      return;
+    }
+
+    // 주문 내역 정리
+    let summary = '*주문 내역 정리*\n\n';
+    for (const order of session.orders) {
+      const selectedMenu = menuConfig.menus.find((m) => m.value === order.menu);
+      const needsBeanOption = menuConfig.categoriesNeedingBeanOption.includes(
+        selectedMenu.category
+      );
+
+      // 주문 내역 부분 조합
+      let orderParts = [
+        `<@${order.userId}>`,
+        order.temperature === 'hot' ? 'HOT' : 'ICE',
+        order.menu,
+      ];
+
+      // 원두 옵션 (필요한 경우만)
+      if (needsBeanOption) {
+        const beanOptionText =
+          menuConfig.beanOptions.find((b) => b.value === order.beanOption)
+            ?.text || '다크(기본)';
+        orderParts.push(beanOptionText);
+      }
+
+      // 기타 옵션
+      if (order.extraOptions && order.extraOptions.length > 0) {
+        const extraOptionsText = order.extraOptions
+          .map(
+            (optValue) =>
+              menuConfig.extraOptions.find((o) => o.value === optValue)?.text
+          )
+          .filter(Boolean)
+          .join('+');
+        if (extraOptionsText) {
+          orderParts.push(extraOptionsText);
+        }
+      }
+
+      // 요청사항
+      if (order.options) {
+        orderParts.push(`(${order.options})`);
+      }
+
+      summary += orderParts.join(' ') + '\n';
+    }
+
+    // 스레드에 정리 내용 추가
+    await client.chat.postMessage({
+      channel: command.channel_id,
+      thread_ts: session.messageTs,
+      text: summary,
+      reply_broadcast: true,
+    });
+
+    // 세션 종료 및 삭제
+    await orderManager.clearSession(command.channel_id);
+  }
+
+  // 도움말 명령어 처리
+  async function handleHelp({ command, client }) {
+    await client.chat.postMessage({
+      channel: command.channel_id,
+      blocks: getTutorialBlocks(),
+    });
+    logger.info('Help message sent successfully');
+  }
+
+  // 메인 command 핸들러
+  app.command('/아즈니섬', async ({ command, client, respond }) => {
+    const subcommand = command.text.trim().toLowerCase();
+
+    logger.info('Command received:', { command: '/아즈니섬', subcommand });
+
+    try {
+      switch (subcommand) {
+        case '주문시작':
+          await handleOrderStart({ command, client, respond });
+          break;
+
+        case '주문마감':
+          await handleOrderEnd({ command, client, respond });
+          break;
+
+        case '도움말':
+          await handleHelp({ command, client });
+          break;
+
+        default:
+          await respond({
+            text: '알 수 없는 명령어입니다. `/아즈니섬 도움말`을 입력하여 사용 가능한 명령어를 확인하세요.',
+            response_type: 'ephemeral',
+          });
+      }
     } catch (error) {
-      logger.error('주문시작 error:', {
+      logger.error('Command handler error:', {
         error: error.message,
         stack: error.stack,
-        command: command,
+        command,
+        subcommand,
       });
 
       await respond({
-        text: `주문 시작 중 오류가 발생했습니다. (${error.message})`,
+        text: `명령어 처리 중 오류가 발생했습니다. (${error.message})`,
         response_type: 'ephemeral',
       });
-    }
-  });
-
-  // 마감 명령어
-  app.command('/아즈니섬 주문마감', async ({ command, client, respond }) => {
-    try {
-      const session = await orderManager.getSession(command.channel_id);
-
-      if (
-        !session ||
-        !(await orderManager.isActiveSession(command.channel_id))
-      ) {
-        await respond({
-          text: '현재 진행 중인 주문이 없습니다.',
-          response_type: 'ephemeral',
-        });
-        return;
-      }
-
-      if (session.orders.length === 0) {
-        await respond({
-          text: '접수된 주문이 없습니다. 주문 세션을 종료합니다.',
-          response_type: 'in_channel',
-        });
-        await orderManager.clearSession(command.channel_id);
-        return;
-      }
-
-      // 주문 내역 정리
-      let summary = '*주문 내역 정리*\n\n';
-      for (const order of session.orders) {
-        const selectedMenu = menuConfig.menus.find(
-          (m) => m.value === order.menu
-        );
-        const needsBeanOption = menuConfig.categoriesNeedingBeanOption.includes(
-          selectedMenu.category
-        );
-
-        // 주문 내역 부분 조합
-        let orderParts = [
-          `<@${order.userId}>`,
-          order.temperature === 'hot' ? 'HOT' : 'ICE',
-          order.menu,
-        ];
-
-        // 원두 옵션 (필요한 경우만)
-        if (needsBeanOption) {
-          const beanOptionText =
-            menuConfig.beanOptions.find((b) => b.value === order.beanOption)
-              ?.text || '다크(기본)';
-          orderParts.push(beanOptionText);
-        }
-
-        // 기타 옵션
-        if (order.extraOptions && order.extraOptions.length > 0) {
-          const extraOptionsText = order.extraOptions
-            .map(
-              (optValue) =>
-                menuConfig.extraOptions.find((o) => o.value === optValue)?.text
-            )
-            .filter(Boolean)
-            .join('+');
-          if (extraOptionsText) {
-            orderParts.push(extraOptionsText);
-          }
-        }
-
-        // 요청사항
-        if (order.options) {
-          orderParts.push(`(${order.options})`);
-        }
-
-        summary += orderParts.join(' ') + '\n';
-      }
-
-      // 스레드에 정리 내용 추가
-      await client.chat.postMessage({
-        channel: command.channel_id,
-        thread_ts: session.messageTs,
-        text: summary,
-        reply_broadcast: true,
-      });
-
-      // 세션 종료 및 삭제
-      await orderManager.clearSession(command.channel_id);
-    } catch (error) {
-      logger.error('마감 처리 실패:', error);
-      await respond({
-        text: '주문 마감 처리 중 오류가 발생했습니다.',
-        response_type: 'ephemeral',
-      });
-    }
-  });
-
-  app.command('/아즈니섬 도움말', async ({ command, ack, client }) => {
-    await ack();
-    try {
-      await client.chat.postMessage({
-        channel: command.channel_id,
-        blocks: getTutorialBlocks(),
-      });
-    } catch (error) {
-      logger.error('도움말 표시 실패:', error);
     }
   });
 

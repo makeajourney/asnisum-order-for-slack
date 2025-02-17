@@ -1,5 +1,4 @@
 // blocks/tutorial.js
-
 const getTutorialBlocks = () => [
   {
     type: 'section',
@@ -41,7 +40,6 @@ const getTutorialBlocks = () => [
   },
 ];
 
-// 다른 메시지 블록들도 함께 관리
 const errorMessages = {
   activeSession:
     '이미 진행 중인 주문이 있습니다. 먼저 `/아즈니섬 주문마감` 명령어로 현재 주문을 마감해주세요.',
