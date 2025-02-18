@@ -63,9 +63,7 @@ module.exports = async (req, res) => {
         headers: req.headers,
       });
     }
-    return res.status(200).json({
-      ok: true,
-    });
+    return res.status(200).json();
   } catch (error) {
     logger.error('Handler error:', {
       error: error.message,
