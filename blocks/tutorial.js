@@ -11,6 +11,13 @@ const getTutorialBlocks = () => [
     type: 'section',
     text: {
       type: 'mrkdwn',
+      text: '*시작하기 전에*\n채널에서 `/invite @asnisum-order` 명령어를 입력하여 봇을 초대해주세요.',
+    },
+  },
+  {
+    type: 'section',
+    text: {
+      type: 'mrkdwn',
       text: '다음 명령어들을 사용할 수 있습니다:',
     },
   },
@@ -35,8 +42,20 @@ const getTutorialBlocks = () => [
     type: 'section',
     text: {
       type: 'mrkdwn',
-      text: "1️⃣ `/아즈니섬 주문시작` 명령어로 주문 세션을 시작합니다\n2️⃣ '주문하기' 버튼을 클릭하여 메뉴를 입력합니다\n3️⃣ 모든 주문이 완료되면 `/아즈니섬 주문마감` 명령어로 주문을 마감합니다",
+      text: "0️⃣ `/invite @asnisum-order` 명령어로 봇을 채널에 초대합니다\n1️⃣ `/아즈니섬 주문시작` 명령어로 주문 세션을 시작합니다\n2️⃣ '주문하기' 버튼을 클릭하여 메뉴를 입력합니다\n3️⃣ 모든 주문이 완료되면 `/아즈니섬 주문마감` 명령어로 주문을 마감합니다",
     },
+  },
+  {
+    type: 'divider',
+  },
+  {
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: '사용문의 <@U032432TM0Q>\n이슈 등록: <https://github.com/makeajourney/asnisum-order-for-slack/issues|GitHub>',
+      },
+    ],
   },
 ];
 
