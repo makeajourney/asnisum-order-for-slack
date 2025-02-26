@@ -21,6 +21,15 @@ const orderMessages = {
               },
               action_id: 'order_button',
             },
+            {
+              type: 'button',
+              text: {
+                type: 'plain_text',
+                text: '주문현황',
+                emoji: true,
+              },
+              action_id: 'check_status_button'
+            },
           ],
         },
       ]
@@ -46,6 +55,15 @@ const orderMessages = {
                 emoji: true,
               },
               action_id: 'order_button',
+            },
+            {
+              type: 'button',
+              text: {
+                type: 'plain_text',
+                text: '주문현황',
+                emoji: true,
+              },
+              action_id: 'check_status_button'
             },
           ],
         },
