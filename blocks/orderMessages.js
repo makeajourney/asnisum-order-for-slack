@@ -19,6 +19,7 @@ const orderMessages = {
                 text: '주문하기',
                 emoji: true,
               },
+              style: 'primary',
               action_id: 'order_button',
             },
             {
@@ -54,6 +55,7 @@ const orderMessages = {
                 text: '주문하기',
                 emoji: true,
               },
+              style: 'primary',
               action_id: 'order_button',
             },
             {
