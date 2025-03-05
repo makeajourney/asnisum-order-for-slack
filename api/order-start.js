@@ -1,4 +1,4 @@
-const { getApp, handleOrderStart } = require('../app');
+const { getApp, handleOrderStart } = require('../lib/app');
 
 module.exports = async (req, res) => {
   if (req.method !== 'GET') {
@@ -9,7 +9,10 @@ module.exports = async (req, res) => {
     const app = getApp();
 
     await handleOrderStart({
-      command: { channel_id: 'C05UUE7SK7Y', text: '주문시작 <!subteam^S046PTK85RV>' },
+      command: {
+        channel_id: 'C05UUE7SK7Y',
+        text: '주문시작 <!subteam^S046PTK85RV>',
+      },
       client: app.client,
       respond: async (message) => {
         await app.client.chat.postMessage({
