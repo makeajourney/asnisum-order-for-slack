@@ -7,6 +7,7 @@ module.exports = async (req, res) => {
 
   try {
     const app = getApp();
+    logger.info('Cron job triggered: order-start');
 
     await handleOrderStart({
       command: {
